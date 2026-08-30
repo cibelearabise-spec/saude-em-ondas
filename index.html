@@ -131,12 +131,12 @@
 
   <div class="tuner" id="lock-panel">
     <div class="field">
-      <label>Senha de administração</label>
-      <input id="f-password" type="password" placeholder="Digite a senha" onkeydown="if(event.key==='Enter')checkPassword()">
+      <label id="lock-label">Senha de administração</label>
+      <input id="f-password" type="password" placeholder="Digite a senha" onkeydown="if(event.key==='Enter')document.getElementById('lock-btn').click()">
     </div>
-    <button class="publish" onclick="checkPassword()">Entrar</button>
+    <button class="publish" id="lock-btn" onclick="checkPassword()">Entrar</button>
     <div class="form-msg" id="lock-msg"></div>
-    <div class="hint">Só quem tem a senha publica ou remove episódios. Ouvintes veem apenas a lista acima.</div>
+    <div class="hint" id="lock-hint">Só quem tem a senha publica ou remove episódios. Ouvintes veem apenas a lista acima.</div>
   </div>
 
   <div class="tuner" id="publish-panel" style="display:none;">
@@ -185,24 +185,84 @@
   }
 
   const STORAGE_KEY = 'episodes-list';
+  const ADMIN_KEY = 'admin-password';
   const listEl = document.getElementById('episodes');
 
-  // Troque esta senha antes de compartilhar o link com os ouvintes.
-  const ADMIN_PASSWORD = 'ondas2026';
   let isAdmin = false;
+  let passwordExists = false;
   let currentEpisodes = [];
 
-  function checkPassword(){
+  async function initLock(){
+    try{
+      const res = await window.storage.get(ADMIN_KEY, true);
+      passwordExists = !!(res && res.value);
+    }catch(e){
+      passwordExists = false; // ainda não foi criada
+    }
+    updateLockUI();
+  }
+
+  function updateLockUI(){
+    const label = document.getElementById('lock-label');
+    const btn = document.getElementById('lock-btn');
+    const hint = document.getElementById('lock-hint');
+    const input = document.getElementById('f-password');
+    if(passwordExists){
+      label.textContent = 'Senha de administração';
+      input.placeholder = 'Digite a senha';
+      btn.textContent = 'Entrar';
+      btn.onclick = checkPassword;
+      hint.textContent = 'Só quem tem a senha publica ou remove episódios. Ouvintes veem apenas a lista acima.';
+    } else {
+      label.textContent = 'Crie a senha de administração';
+      input.placeholder = 'Escolha uma senha (mínimo 4 caracteres)';
+      btn.textContent = 'Definir senha';
+      btn.onclick = setPassword;
+      hint.textContent = 'Nenhuma senha foi criada ainda. Defina uma agora — só quem souber dela vai conseguir publicar ou remover episódios depois.';
+    }
+  }
+
+  async function setPassword(){
     const val = document.getElementById('f-password').value;
     const msg = document.getElementById('lock-msg');
-    if(val === ADMIN_PASSWORD){
+    if(!val || val.length < 4){
+      msg.textContent = 'Escolha uma senha com pelo menos 4 caracteres.';
+      msg.className = 'form-msg err';
+      return;
+    }
+    try{
+      await window.storage.set(ADMIN_KEY, val, true);
+      passwordExists = true;
       isAdmin = true;
       document.getElementById('lock-panel').style.display = 'none';
       document.getElementById('publish-panel').style.display = 'block';
       renderEpisodes(currentEpisodes);
-    } else {
-      msg.textContent = 'Senha incorreta.';
+    }catch(e){
+      msg.textContent = 'Não foi possível salvar a senha agora. Tente de novo.';
       msg.className = 'form-msg err';
+      console.error(e);
+    }
+  }
+
+  async function checkPassword(){
+    const val = document.getElementById('f-password').value;
+    const msg = document.getElementById('lock-msg');
+    try{
+      const res = await window.storage.get(ADMIN_KEY, true);
+      const stored = res ? res.value : null;
+      if(stored && val === stored){
+        isAdmin = true;
+        document.getElementById('lock-panel').style.display = 'none';
+        document.getElementById('publish-panel').style.display = 'block';
+        renderEpisodes(currentEpisodes);
+      } else {
+        msg.textContent = 'Senha incorreta.';
+        msg.className = 'form-msg err';
+      }
+    }catch(e){
+      msg.textContent = 'Não foi possível verificar a senha agora. Tente de novo.';
+      msg.className = 'form-msg err';
+      console.error(e);
     }
   }
 
@@ -390,6 +450,7 @@
   }
 
   loadEpisodes();
+  initLock();
 </script>
 </body>
 </html>
