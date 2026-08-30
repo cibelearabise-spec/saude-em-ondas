@@ -6,6 +6,8 @@
 <title>Saúde em Ondas — Podcast</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --bg: #12303B;
@@ -184,8 +186,20 @@
     wf.appendChild(s);
   }
 
-  const STORAGE_KEY = 'episodes-list';
-  const ADMIN_KEY = 'admin-password';
+  // ====================================================================
+  // COLE AQUI AS CHAVES DO SEU PROJETO FIREBASE (Configurações do projeto > Seus aplicativos)
+  const firebaseConfig = {
+    apiKey: "AIzaSyAvL32G0oo6oRiSraBNGY8wwBYkMSZ4IrU",
+    authDomain: "saude-em-ondas.firebaseapp.com",
+    projectId: "saude-em-ondas",
+    storageBucket: "saude-em-ondas.firebasestorage.app",
+    messagingSenderId: "415585861279",
+    appId: "1:415585861279:web:033a03e9d0a0aba143ecaa"
+  };
+  // ====================================================================
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+
   const listEl = document.getElementById('episodes');
 
   let isAdmin = false;
@@ -194,10 +208,11 @@
 
   async function initLock(){
     try{
-      const res = await window.storage.get(ADMIN_KEY, true);
-      passwordExists = !!(res && res.value);
+      const doc = await db.collection('config').doc('admin').get();
+      passwordExists = doc.exists && !!doc.data().password;
     }catch(e){
-      passwordExists = false; // ainda não foi criada
+      passwordExists = false;
+      console.error('Erro ao verificar senha:', e);
     }
     updateLockUI();
   }
@@ -231,14 +246,14 @@
       return;
     }
     try{
-      await window.storage.set(ADMIN_KEY, val, true);
+      await db.collection('config').doc('admin').set({ password: val });
       passwordExists = true;
       isAdmin = true;
       document.getElementById('lock-panel').style.display = 'none';
       document.getElementById('publish-panel').style.display = 'block';
       renderEpisodes(currentEpisodes);
     }catch(e){
-      msg.textContent = 'Não foi possível salvar a senha agora. Tente de novo.';
+      msg.textContent = 'Não foi possível salvar a senha agora. Verifique se as chaves do Firebase foram coladas corretamente.';
       msg.className = 'form-msg err';
       console.error(e);
     }
@@ -248,8 +263,8 @@
     const val = document.getElementById('f-password').value;
     const msg = document.getElementById('lock-msg');
     try{
-      const res = await window.storage.get(ADMIN_KEY, true);
-      const stored = res ? res.value : null;
+      const doc = await db.collection('config').doc('admin').get();
+      const stored = doc.exists ? doc.data().password : null;
       if(stored && val === stored){
         isAdmin = true;
         document.getElementById('lock-panel').style.display = 'none';
@@ -260,7 +275,7 @@
         msg.className = 'form-msg err';
       }
     }catch(e){
-      msg.textContent = 'Não foi possível verificar a senha agora. Tente de novo.';
+      msg.textContent = 'Não foi possível verificar a senha agora.';
       msg.className = 'form-msg err';
       console.error(e);
     }
@@ -344,21 +359,19 @@
 
   async function loadEpisodes(){
     try{
-      let episodes;
-      try{
-        const res = await window.storage.get(STORAGE_KEY, true);
-        episodes = res ? JSON.parse(res.value) : null;
-      }catch(e){
-        episodes = null; // key doesn't exist yet
-      }
-      if(!episodes){
-        episodes = seedEpisodes;
-        await window.storage.set(STORAGE_KEY, JSON.stringify(episodes), true);
+      const snapshot = await db.collection('episodes').orderBy('date', 'asc').get();
+      let episodes = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      if(episodes.length === 0){
+        for(const ep of seedEpisodes){
+          await db.collection('episodes').add({ title: ep.title, desc: ep.desc, audio: ep.audio, date: ep.date });
+        }
+        const snap2 = await db.collection('episodes').orderBy('date', 'asc').get();
+        episodes = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
       }
       currentEpisodes = episodes;
       renderEpisodes(episodes);
     }catch(e){
-      listEl.innerHTML = '<div class="status">Não foi possível carregar os episódios agora. Recarregue a página para tentar de novo.</div>';
+      listEl.innerHTML = '<div class="status">Não foi possível carregar os episódios agora. Verifique se as chaves do Firebase foram coladas corretamente no código.</div>';
       console.error('Erro ao carregar episódios:', e);
     }
   }
@@ -394,12 +407,8 @@
   async function deleteEpisode(id){
     if(!isAdmin) return;
     try{
-      const res = await window.storage.get(STORAGE_KEY, true);
-      let episodes = res ? JSON.parse(res.value) : [];
-      episodes = episodes.filter(e => e.id !== id);
-      await window.storage.set(STORAGE_KEY, JSON.stringify(episodes), true);
-      currentEpisodes = episodes;
-      renderEpisodes(episodes);
+      await db.collection('episodes').doc(id).delete();
+      await loadEpisodes();
     }catch(e){
       alert('Não foi possível remover o episódio agora. Tente novamente.');
       console.error(e);
@@ -425,16 +434,11 @@
     msg.className = 'form-msg';
 
     try{
-      const res = await window.storage.get(STORAGE_KEY, true);
-      let episodes = res ? JSON.parse(res.value) : [];
-      episodes.push({
-        id: 'ep-' + Date.now(),
+      await db.collection('episodes').add({
         title, desc, audio,
         date: new Date().toISOString()
       });
-      await window.storage.set(STORAGE_KEY, JSON.stringify(episodes), true);
-      currentEpisodes = episodes;
-      renderEpisodes(episodes);
+      await loadEpisodes();
       document.getElementById('f-title').value = '';
       document.getElementById('f-desc').value = '';
       document.getElementById('f-audio').value = '';
