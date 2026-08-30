@@ -149,6 +149,18 @@
       <textarea id="f-desc" placeholder="Um resumo curto do episódio para os ouvintes"></textarea>
     </div>
     <div class="field">
+      <label>Gravar direto pelo navegador (opcional)</label>
+      <button type="button" class="publish" id="rec-btn" onclick="toggleRecording()">● Iniciar gravação</button>
+      <div class="hint" id="rec-timer"></div>
+      <div id="rec-preview" style="display:none;margin-top:14px;">
+        <audio id="rec-audio" controls></audio>
+        <div style="margin-top:8px;">
+          <button type="button" class="del" onclick="downloadRecording()">baixar gravação</button>
+        </div>
+      </div>
+      <div class="hint">Grave aqui, clique em "baixar gravação", suba o arquivo em algum serviço de hospedagem (GitHub, Google Drive etc.) e cole o link no campo abaixo.</div>
+    </div>
+    <div class="field">
       <label>URL do áudio (mp3)</label>
       <input id="f-audio" type="text" placeholder="https://...">
       <div class="hint">Cole o link direto do arquivo .mp3. Você pode hospedar o áudio em um repositório do GitHub (link "raw"), Google Drive (link direto) ou outro serviço de hospedagem de arquivos — esta página não grava nem armazena o áudio em si, só o link.</div>
@@ -192,6 +204,61 @@
       msg.textContent = 'Senha incorreta.';
       msg.className = 'form-msg err';
     }
+  }
+
+  // ---- gravação direta pelo navegador ----
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let recordingStartTime = 0;
+  let timerInterval = null;
+  let recordedBlobUrl = null;
+
+  async function toggleRecording(){
+    const btn = document.getElementById('rec-btn');
+    const timerEl = document.getElementById('rec-timer');
+
+    if(!mediaRecorder || mediaRecorder.state === 'inactive'){
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+          recordedBlobUrl = URL.createObjectURL(blob);
+          document.getElementById('rec-audio').src = recordedBlobUrl;
+          document.getElementById('rec-preview').style.display = 'block';
+          stream.getTracks().forEach(t => t.stop());
+        };
+        mediaRecorder.start();
+        recordingStartTime = Date.now();
+        timerInterval = setInterval(() => {
+          const secs = Math.floor((Date.now() - recordingStartTime) / 1000);
+          const m = String(Math.floor(secs / 60)).padStart(2, '0');
+          const s = String(secs % 60).padStart(2, '0');
+          timerEl.textContent = `gravando… ${m}:${s}`;
+        }, 500);
+        btn.textContent = '■ Parar gravação';
+      }catch(e){
+        alert('Não foi possível acessar o microfone. Verifique se o navegador tem permissão de microfone para esta página.');
+        console.error(e);
+      }
+    } else {
+      mediaRecorder.stop();
+      clearInterval(timerInterval);
+      timerEl.textContent = 'gravação parada — ouça abaixo e baixe se quiser usar.';
+      btn.textContent = '● Iniciar gravação';
+    }
+  }
+
+  function downloadRecording(){
+    if(!recordedBlobUrl) return;
+    const a = document.createElement('a');
+    a.href = recordedBlobUrl;
+    a.download = 'episodio-' + Date.now() + '.webm';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   const seedEpisodes = [
